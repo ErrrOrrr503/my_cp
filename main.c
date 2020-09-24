@@ -15,6 +15,10 @@ extern int errno;
 
 typedef int fdesc;
 
+struct options {
+	char force_flag;
+} g_options = {0};
+
 enum filetype {
 	nofile,
 	dir,
@@ -40,21 +44,25 @@ int symlink_to_file_copy (struct fileinfo *source_f, struct fileinfo *dest_f);
 int symlink_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct fileinfo *dest_f);
 int symlink_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dir_f);
 
+int parse_options (int argc, char *argv[]);
 
 int main (int argc, char *argv[])
 {
+	const char nosupport_msg[] = "is not a regular file, symlink or directory";
+	int ret = 0; //common var for return value
+
 	//arg checking
-	if (argc != 3) {
-		printf ("Usage: %s <source> <destenition>\n", argv[0]);
+	if (argc < 3) {
+		printf ("Usage: %s <options> <source> <destenition>\n", argv[0]);
 		return -2;
 	}
-	const char nosupport_msg[] = "is not a regular file, symlink or directory";
-	
-	int ret = 0; //common var for return value
+	ret = parse_options (argc, argv);
+	if (ret)
+		return ret;
 
 	//sorce stat
 	struct fileinfo source_f = {0};
-	source_f.name = argv[1];
+	source_f.name = argv[argc - 2];
 	ret = lstat_fileinfo (&source_f);
 	if (ret) {
 		perror (source_f.name);
@@ -63,7 +71,7 @@ int main (int argc, char *argv[])
 	
 	//dest stat
 	struct fileinfo dest_f = {0};
-	dest_f.name = argv[2];
+	dest_f.name = argv[argc - 1];
 	lstat_fileinfo (&dest_f);
 
 	//source prcessing
@@ -97,6 +105,11 @@ int main (int argc, char *argv[])
 		case slink:
 			//must execute regfile section
 		case nofile:
+			if (source_f.type == dir) {
+				printf ("dir to newdir fixme\n");
+				//ret = dir_to_dir_copy (&source_f, &dest_f);
+				break;
+			}
 			//must execute regfile section
 		case regfile:
 			switch (source_f.type) {
@@ -126,15 +139,37 @@ int main (int argc, char *argv[])
 	return ret;
 }
 
+int parse_options (int argc, char *argv[])
+{
+	const char noparam_msg[] = "unrecognized option";
+	for (int i = 1; i < argc - 2; i++) {
+		if (argv[i][0] != '-') {
+			printf ("%s: '%s'\n", noparam_msg, argv[i]);
+			return -1;
+		}
+		switch (argv[i][1]) {
+			case 'f':
+				g_options.force_flag = 1;
+				break;
+			default:
+				printf ("%s: '%s'\n", noparam_msg, argv[i]);
+				return -1;
+		}
+	}
+	return 0;
+}
+
 int symlink_to_file_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 {
 	#define NAME_LENGTH 4096
 
 	if (source_f == NULL || dest_f == NULL)
 		return -2;
-	if (dest_f->type != nofile) {
-		printf ("FIXME::EXISTS\n");
-	       	return _ERR_FIXME;
+	if (dest_f->type != nofile && g_options.force_flag) {
+		if (unlink (dest_f->name)) {
+			perror (dest_f->name);
+			return -1;
+		}
 	}
 	char linked_name[NAME_LENGTH] = {0};
 	if (readlink (source_f->name, linked_name, NAME_LENGTH) == -1) {
@@ -164,9 +199,11 @@ int symlink_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, 
 	}
 
 	struct stat temp;
-	if (!fstatat (dir_f->fd, dest_f->name, &temp, AT_SYMLINK_NOFOLLOW)) {
-		printf ("FIXME::EXISTS\n");
-	       	return _ERR_FIXME;
+	if (!fstatat (dir_f->fd, dest_f->name, &temp, AT_SYMLINK_NOFOLLOW) && g_options.force_flag) {
+		if (unlinkat (dir_f->fd, dest_f->name, 0)) {
+			perror (dest_f->name);
+			return -1;
+		}
 	}
 
 	char linked_name[NAME_LENGTH] = {0};
@@ -220,10 +257,15 @@ int file_to_file_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 	if (source_f == NULL || dest_f == NULL)
 		return -2;
 	dest_f->fd = open (dest_f->name, O_WRONLY | O_CREAT | O_EXCL, source_f->st.st_mode);
-	if (dest_f->fd == -1 && errno == EEXIST) {
-		//here implementation of --force flag with reopening => ret changing
-		printf ("FIXME::EXISTS\n");
-		return _ERR_FIXME;
+	if (dest_f->fd == -1 && errno == EEXIST && g_options.force_flag) {
+		dest_f->fd = open (dest_f->name, O_WRONLY | O_TRUNC, source_f->st.st_mode);
+		if (dest_f->fd == -1) {
+			if (unlink (dest_f->name)) {
+				perror (dest_f->name);
+				return -1;
+			}
+			dest_f->fd = open (dest_f->name, O_WRONLY | O_CREAT, source_f->st.st_mode);
+		}
 	}
 	if (dest_f->fd == -1) {
 		perror (dest_f->name);
@@ -250,10 +292,15 @@ int file_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, str
 	}
 	//open dest
 	dest_f->fd = openat (dir_f->fd, dest_f->name, O_WRONLY | O_CREAT | O_EXCL, source_f->st.st_mode);
-	if (dest_f->fd == -1 && errno == EEXIST) {
-		//here implementation of --force flag with reopening => ret changing
-		printf ("FIXME::EXISTS\n");
-		return _ERR_FIXME;
+	if (dest_f->fd == -1 && errno == EEXIST && g_options.force_flag) {
+		dest_f->fd = openat (dir_f->fd, dest_f->name, O_WRONLY | O_TRUNC, source_f->st.st_mode);
+		if (dest_f->fd == -1) {
+			if (unlinkat (dir_f->fd, dest_f->name, 0)) {
+				perror (dest_f->name);
+				return -1;
+			}
+			dest_f->fd = openat (dir_f->fd, dest_f->name, O_WRONLY | O_CREAT, source_f->st.st_mode);
+		}
 	}
 	if (dest_f->fd == -1) {
 		perror (dest_f->name);
