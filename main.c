@@ -17,6 +17,7 @@ typedef int fdesc;
 
 struct options {
 	char force_flag;
+	char uid_gid_copy_flag;
 } g_options = {0};
 
 enum filetype {
@@ -45,6 +46,11 @@ int symlink_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, 
 int symlink_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dir_f);
 
 int parse_options (int argc, char *argv[]);
+
+int switch_source_to_regfile (struct fileinfo *source_f, struct fileinfo *dest_f);
+int switch_source_to_dir (struct fileinfo *source_f, struct fileinfo *dest_f);
+int switch_source_to_nofile (struct fileinfo *source_f, struct fileinfo *dest_f);
+int switch_source_to_symlink (struct fileinfo *source_f, struct fileinfo *dir_f);
 
 int main (int argc, char *argv[])
 {
@@ -87,44 +93,16 @@ int main (int argc, char *argv[])
 	//dest filetype processing
 	switch (dest_f.type) {
 		case dir:
-			switch (source_f.type) {
-				case slink:
-					ret = symlink_to_dir_copy (&source_f, &dest_f);
-					break;
-				case regfile:
-					ret = file_to_dir_copy (&source_f, &dest_f);
-					break;
-				case dir:
-					printf ("dir to dir fixme\n");
-					//ret = dir_to_dir_copy (&source_f, &dest_f);
-					break;
-				default:
-					break;
-			}
+			ret = switch_source_to_dir (&source_f, &dest_f);
 			break;
 		case slink:
-			//must execute regfile section
+			ret = switch_source_to_symlink (&source_f, &dest_f);
+			break;
 		case nofile:
-			if (source_f.type == dir) {
-				printf ("dir to newdir fixme\n");
-				//ret = dir_to_dir_copy (&source_f, &dest_f);
-				break;
-			}
-			//must execute regfile section
+			ret = switch_source_to_nofile (&source_f, &dest_f);
+			break;
 		case regfile:
-			switch (source_f.type) {
-				case slink:
-					ret = symlink_to_file_copy (&source_f, &dest_f);
-					break;
-				case regfile:
-					ret = file_to_file_copy (&source_f, &dest_f);
-					break;
-				case dir:
-					printf ("dir to file copying is not supported, maybe you wish to use 'tar' instead?\n");
-					break;
-				default: 
-					break;
-			}
+			ret = switch_source_to_regfile (&source_f, &dest_f);
 			break;
 		case nosupport:
 			printf ("'%s': %s\n", dest_f.name, nosupport_msg);
@@ -139,6 +117,70 @@ int main (int argc, char *argv[])
 	return ret;
 }
 
+//########        section wraps        ########//
+int symlink_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dir_f)
+{
+	return file_to_dir_copy (source_f, dir_f);
+}
+
+int switch_source_to_symlink (struct fileinfo *source_f, struct fileinfo *dir_f)
+{
+	return switch_source_to_regfile (source_f, dir_f);
+}
+//########      section wraps end      ########// 
+
+//########      section switches       ########//
+int switch_source_to_dir (struct fileinfo *source_f, struct fileinfo *dest_f)
+{
+	int ret = 0;
+	switch (source_f->type) {
+		case slink:
+			ret = symlink_to_dir_copy (source_f, dest_f);
+			break;
+		case regfile:
+			ret = file_to_dir_copy (source_f, dest_f);
+			break;
+		case dir:
+			printf ("dir to dir fixme\n");
+			//ret = dir_to_dir_copy (source_f, dest_f);
+			ret = _ERR_FIXME;
+			break;
+		default:
+			break;
+	}
+	return ret;
+}
+
+int switch_source_to_regfile (struct fileinfo *source_f, struct fileinfo *dest_f)
+{
+	int ret = 0;
+	switch (source_f->type) {
+		case slink:
+			ret = symlink_to_file_copy (source_f, dest_f);
+			break;
+		case regfile:
+			ret = file_to_file_copy (source_f, dest_f);
+			break;
+		case dir:
+			printf ("dir to file copying is not supported, maybe you wish to use 'tar' instead?\n");
+			break;
+		default: 
+			break;
+	}
+	return ret;
+}
+
+int switch_source_to_nofile (struct fileinfo *source_f, struct fileinfo *dest_f)
+{
+	if (source_f->type == dir) {
+		printf ("dir to newdir fixme\n");
+		//return dir_to_dir_copy (source_f, dest_f);
+		return _ERR_FIXME;
+	}
+	return switch_source_to_regfile (source_f, dest_f);
+}
+//########    section switches end     ########//
+
 int parse_options (int argc, char *argv[])
 {
 	const char noparam_msg[] = "unrecognized option";
@@ -150,6 +192,9 @@ int parse_options (int argc, char *argv[])
 		switch (argv[i][1]) {
 			case 'f':
 				g_options.force_flag = 1;
+				break;
+			case 'u':
+				g_options.uid_gid_copy_flag = 1;
 				break;
 			default:
 				printf ("%s: '%s'\n", noparam_msg, argv[i]);
@@ -179,6 +224,12 @@ int symlink_to_file_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 	if (symlink (linked_name, dest_f->name) == -1) {
 		perror (dest_f->name);
 		return -1;
+	}
+	if (g_options.uid_gid_copy_flag) {
+		if (lchown (dest_f->name, source_f->st.st_uid, source_f->st.st_gid)) {
+			perror (dest_f->name);
+			return -1;
+		}
 	}
 	return 0;
 	
@@ -215,18 +266,16 @@ int symlink_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, 
 		perror (dest_f->name);
 		return -1;
 	}
+	if (g_options.uid_gid_copy_flag) {
+		if (fchownat (dir_f->fd, dest_f->name, source_f->st.st_uid, source_f->st.st_gid, AT_SYMLINK_NOFOLLOW)) {
+			perror (dest_f->name);
+			return -1;
+		}
+	}
 	return 0;
 	
 	#undef NAME_LENGTH
 }
-
-
-int symlink_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dir_f)
-{
-	// wrap, as file to dir copy can cope with it.
-	return file_to_dir_copy (source_f, dir_f);
-}
-
 
 int file_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dir_f)
 {
@@ -274,9 +323,18 @@ int file_to_file_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 
 	int ret = 0;
 	ret = fcopy_calloc (source_f, dest_f, 32768);
-	if (ret)
+	if (ret) {
 		printf ("err: fcopy () returned %d\n", ret);
-	return ret;
+		return ret;
+	}
+
+	if (g_options.uid_gid_copy_flag) {
+		if (fchown (dest_f->fd, source_f->st.st_uid, source_f->st.st_gid)) {
+			perror (dest_f->name);
+			return -1;
+		}
+	}
+	return 0;
 }
 
 int file_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct fileinfo *dest_f)
@@ -309,9 +367,18 @@ int file_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, str
 
 	int ret = 0;
 	ret = fcopy_calloc (source_f, dest_f, 32768);
-	if (ret)
+	if (ret) {
 		printf ("err: fcopy () returned %d\n", ret);
-	return ret;
+		return ret;
+	}
+
+	if (g_options.uid_gid_copy_flag) {
+		if (fchown (dest_f->fd, source_f->st.st_uid, source_f->st.st_gid)) {
+			perror (dest_f->name);
+			return -1;
+		}
+	}
+	return 0;
 }
 
 
@@ -349,6 +416,11 @@ int fcopy_calloc (struct fileinfo *source_f, struct fileinfo *dest_f, off_t bs)
 	
 	#define SOURCE_SIZE source_f->st.st_size
 	#define DEST_SIZE dest_f->st.st_size
+
+	if (source_f == NULL || dest_f == NULL)
+		return -2;
+	if (source_f->fd == -1 || dest_f->fd == -1)
+		return -2;
 
 	if (SOURCE_SIZE < bs) bs = SOURCE_SIZE;
 
