@@ -1,3 +1,7 @@
+# testing folder
+/tests/
+#binary file
+my_cp
 # Prerequisites
 *.d
 

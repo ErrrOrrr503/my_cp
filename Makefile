@@ -25,19 +25,23 @@ tests:
 	ln -s nonuser-rw $(TDIR)/nonuser-rw-user-symlink
 	sudo -u $(NONUSER) ln -s nonuser-rw $(TDIR)/nonuser-rw-nonuser-symlink
 	#### testing file to file copy ####
-	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/user-rw_c
-	$(TDIR)/my_cp $(TDIR)/user-ro $(TDIR)/user-ro_c
-	$(TDIR)/my_cp $(TDIR)/user-wo $(TDIR)/user-wo_c
-	sudo $(TDIR)/my_cp -u $(TDIR)/nonuser-rw $(TDIR)/nonuser-rw_c
+	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/user-rw-c
+	$(TDIR)/my_cp $(TDIR)/user-ro $(TDIR)/user-ro-c
+	$(TDIR)/my_cp $(TDIR)/user-wo $(TDIR)/user-wo-c
+	$(TDIR)/my_cp -t $(TDIR)/user-rw $(TDIR)/user-rw-c-t
+	sudo $(TDIR)/my_cp -u $(TDIR)/nonuser-rw $(TDIR)/nonuser-rw-c
 	#### testing file to dir copy  ####
 	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/dir-rw/
 	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/dir-ro
 	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/dir-wo/
+	$(TDIR)/my_cp -tf $(TDIR)/nonuser-rw $(TDIR)/dir-rw/
 	#### testing symlink copying   #### 
 	$(TDIR)/my_cp $(TDIR)/user-rw-user-symlink $(TDIR)/user-rw-user-symlink-c
 	$(TDIR)/my_cp $(TDIR)/user-rw-user-symlink $(TDIR)/dir-rw/
 	$(TDIR)/my_cp $(TDIR)/nonuser-rw-user-symlink $(TDIR)/dir-rw
 	sudo $(TDIR)/my_cp -u $(TDIR)/nonuser-rw-nonuser-symlink $(TDIR)/dir-rw/
+	$(TDIR)/my_cp -t $(TDIR)/user-rw-user-symlink $(TDIR)/user-rw-user-symlink-c-t
+
 clean:
 	rm my_cp
 clean_tests:

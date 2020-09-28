@@ -18,6 +18,7 @@ typedef int fdesc;
 struct options {
 	char force_flag;
 	char uid_gid_copy_flag;
+	char time_copy_flag;
 } g_options = {0};
 
 enum filetype {
@@ -189,16 +190,21 @@ int parse_options (int argc, char *argv[])
 			printf ("%s: '%s'\n", noparam_msg, argv[i]);
 			return -1;
 		}
-		switch (argv[i][1]) {
-			case 'f':
-				g_options.force_flag = 1;
-				break;
-			case 'u':
-				g_options.uid_gid_copy_flag = 1;
-				break;
-			default:
-				printf ("%s: '%s'\n", noparam_msg, argv[i]);
-				return -1;
+		for (int j = 1; argv[i][j] != 0; j++) {
+			switch (argv[i][j]) {
+				case 'f':
+					g_options.force_flag = 1;
+					break;
+				case 'u':
+					g_options.uid_gid_copy_flag = 1;
+					break;
+				case 't':
+					g_options.time_copy_flag = 1;
+					break;
+				default:
+					printf ("%s: '%s'\n", noparam_msg, argv[i]);
+					return -1;
+			}
 		}
 	}
 	return 0;
@@ -227,6 +233,14 @@ int symlink_to_file_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 	}
 	if (g_options.uid_gid_copy_flag) {
 		if (lchown (dest_f->name, source_f->st.st_uid, source_f->st.st_gid)) {
+			perror (dest_f->name);
+			return -1;
+		}
+	}
+	
+	if (g_options.time_copy_flag) {
+		struct timespec tmp[2] = {source_f->st.st_atim, source_f->st.st_mtim};
+		if (utimensat (AT_FDCWD, dest_f->name, tmp, AT_SYMLINK_NOFOLLOW)) {
 			perror (dest_f->name);
 			return -1;
 		}
@@ -268,6 +282,13 @@ int symlink_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, 
 	}
 	if (g_options.uid_gid_copy_flag) {
 		if (fchownat (dir_f->fd, dest_f->name, source_f->st.st_uid, source_f->st.st_gid, AT_SYMLINK_NOFOLLOW)) {
+			perror (dest_f->name);
+			return -1;
+		}
+	}
+	if (g_options.time_copy_flag) {
+		struct timespec tmp[2] = {source_f->st.st_atim, source_f->st.st_mtim};
+		if (utimensat (dir_f->fd, dest_f->name, tmp, AT_SYMLINK_NOFOLLOW)) {
 			perror (dest_f->name);
 			return -1;
 		}
@@ -334,6 +355,13 @@ int file_to_file_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 			return -1;
 		}
 	}
+	if (g_options.time_copy_flag) {
+		struct timespec tmp[2] = {source_f->st.st_atim, source_f->st.st_mtim};
+		if (futimens (dest_f->fd, tmp)) {
+			perror (dest_f->name);
+			return -1;
+		}
+	}
 	return 0;
 }
 
@@ -374,6 +402,13 @@ int file_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, str
 
 	if (g_options.uid_gid_copy_flag) {
 		if (fchown (dest_f->fd, source_f->st.st_uid, source_f->st.st_gid)) {
+			perror (dest_f->name);
+			return -1;
+		}
+	}
+	if (g_options.time_copy_flag) {
+		struct timespec tmp[2] = {source_f->st.st_atim, source_f->st.st_mtim};
+		if (futimens (dest_f->fd, tmp)) {
 			perror (dest_f->name);
 			return -1;
 		}
