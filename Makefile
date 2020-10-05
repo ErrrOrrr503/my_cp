@@ -17,6 +17,9 @@ tests:
 	dd if=/dev/urandom of=$(TDIR)/nonuser-rw bs=1M count=1
 	sudo chown $(NONUSER) $(TDIR)/nonuser-rw
 	mkdir $(TDIR)/dir-rw
+	mkdir $(TDIR)/dir-rw/dir-1
+	mkdir $(TDIR)/dir-rw/dir-1/dir-2
+	mkdir $(TDIR)/dir-rw/dir-2
 	mkdir $(TDIR)/dir-ro
 	chmod a-w $(TDIR)/dir-ro
 	mkdir $(TDIR)/dir-wo
@@ -34,14 +37,23 @@ tests:
 	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/dir-rw/
 	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/dir-ro
 	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/dir-wo/
-	$(TDIR)/my_cp -tf $(TDIR)/nonuser-rw $(TDIR)/dir-rw/
+	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/dir-wo/dir-1
+	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/dir-wo/dir-1/dir-2
+	$(TDIR)/my_cp -utf $(TDIR)/nonuser-rw $(TDIR)/dir-rw/
+	$(TDIR)/my_cp -utf $(TDIR)/nonuser-rw $(TDIR)/dir-rw/dir-1
+	$(TDIR)/my_cp -utf $(TDIR)/nonuser-rw $(TDIR)/dir-rw/dir-2
+	$(TDIR)/my_cp -utf $(TDIR)/nonuser-rw $(TDIR)/dir-rw/dir-1/dir-2
 	#### testing symlink copying   #### 
 	$(TDIR)/my_cp $(TDIR)/user-rw-user-symlink $(TDIR)/user-rw-user-symlink-c
 	$(TDIR)/my_cp $(TDIR)/user-rw-user-symlink $(TDIR)/dir-rw/
-	$(TDIR)/my_cp $(TDIR)/nonuser-rw-user-symlink $(TDIR)/dir-rw
+	$(TDIR)/my_cp $(TDIR)/user-rw-user-symlink $(TDIR)/dir-rw/dir-2
+	$(TDIR)/my_cp $(TDIR)/user-rw-user-symlink $(TDIR)/dir-rw/dir-1/dir-2
+	$(TDIR)/my_cp -utf $(TDIR)/nonuser-rw-user-symlink $(TDIR)/dir-rw
 	sudo $(TDIR)/my_cp -u $(TDIR)/nonuser-rw-nonuser-symlink $(TDIR)/dir-rw/
 	$(TDIR)/my_cp -t $(TDIR)/user-rw-user-symlink $(TDIR)/user-rw-user-symlink-c-t
-
+	#### testind dir to dir copying ####
+	mkdir $(TDIR)/dir-rw-c/
+	sudo $(TDIR)/my_cp -uft $(TDIR)/dir-rw $(TDIR)/dir-rw-c/
 clean:
 	rm my_cp
 clean_tests:
