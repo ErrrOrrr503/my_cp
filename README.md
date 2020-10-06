@@ -5,15 +5,17 @@ Is more or less functional implementation of binutils/cp. Will be developed futh
 2) file to dir copy
 3) dir to dir recursive copying (getdents64 used) finally...
 4) symlink copying. Note: target is preserved, not changed to point to same file
-1) default: no overwriting
-6) -f (force) option support for overwriting
-7) -u option to preserve uid and git, see issue 4 for more info
-8) -t option to preserve last access and modify times in nanoseconds
-9) options can be differently combinated: <-t -u> <-tu -f> <-ftu>
-10) insufficient rights and other errors informing using perror
-11) linux rights 'rwx' for user, group, others saving on copy
-12) block read-write file copy
-13) Checking if source and destination are neither regular files nor directories (tested on /dev/urandom, /dev/null)
+5) fifo copying
+6) block and char file copying
+7) default: no overwriting
+8) -f (force) option support for overwriting
+9) -u option to preserve uid and git, see issue 4 for more info
+10) -t option to preserve last access and modify times in nanoseconds
+11) options can be differently combinated: <-t -u> <-tu -f> <-ftu>
+12) insufficient rights and other errors informing using perror
+13) linux rights 'rwx' for user, group, others saving on copy
+14) block read-write file copy
+15) Checking if source and destination are neither regular files nor directories (tested on /dev/urandom, /dev/null)
 
 # known issues:
 1) while attempting to copy to unexisting directory, error message is not that correct:"Это каталог". Well, in qute many cases messages of perror can't be correct.
