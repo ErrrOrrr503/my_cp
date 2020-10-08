@@ -12,6 +12,7 @@
 #include <dirent.h> 
 #include <inttypes.h>
 #include <sys/syscall.h>
+#include <sys/xattr.h>
 
 extern int errno;
 
@@ -26,6 +27,7 @@ struct options {
 	char force_flag;
 	char uid_gid_copy_flag;
 	char time_copy_flag;
+	char xattr_flag;
 	unsigned int getdents_buffer_size;
 	off_t block_size;
 } g_options = {0};
@@ -62,6 +64,8 @@ struct linux_dirent64 {
 
 int parse_options_and_init (int argc, char *argv[]);
 int fileinfo_init (struct fileinfo *file_f, const char *name);
+const char* extract_relative_name (const char *name);
+int extract_absolute_name (fdesc fd, char *source_full_name);
 
 int fcopy_calloc (struct fileinfo *source_f, struct fileinfo *dest_f, off_t bs);
 int fstatat_fileinfo (struct fileinfo *dir_f, struct fileinfo *file_f, int flags);
@@ -70,6 +74,7 @@ int file_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, str
 int fifo_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct fileinfo *dest_f);
 int node_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct fileinfo *dest_f, dev_t dev);
 int symlink_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct fileinfo *dest_f);
+int meta_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct fileinfo *dest_f);
 
 int dir_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dest_f);
 int file_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dest_f);
@@ -288,6 +293,9 @@ int parse_options_and_init (int argc, char *argv[])
 				case 't':
 					g_options.time_copy_flag = 1;
 					break;
+				case 'x':
+					g_options.xattr_flag = 1;
+					break;
 				default:
 					printf ("%s: '%s'\n", noparam_msg, argv[i]);
 					return -1;
@@ -314,7 +322,122 @@ int meta_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct file
 			return -1;
 		}
 	}
+	//copy xattrs
+	if (g_options.xattr_flag) {
+		char source_full_name[PATH_MAX] = {0}, dest_full_name[PATH_MAX] = {0};
+		//if abs name
+		if (source_f->name[0] == '/') {
+			strcpy (source_full_name, source_f->name);
+		}
+		//if rel name
+		else {
+			if (extract_absolute_name (source_f->parent_dirfd, source_full_name))
+				return -1;
+			strcat (source_full_name, "/");
+			strcat (source_full_name, source_f->name);
+		}
+		//now we have absolute filename of source
+		if (dest_f->name[0] == '/') {
+			strcpy (dest_full_name, dest_f->name);
+		}
+		else {
+			if (extract_absolute_name (dir_f->fd, dest_full_name))
+				return -1;
+			strcat (dest_full_name, "/");
+			strcat (dest_full_name, dest_f->name);
+		}
+		//now we have absolute filename of dest
+		ssize_t xattr_buf_len = llistxattr (source_full_name, NULL, 0);
+		if (xattr_buf_len == -1) {
+			perror (source_full_name);
+			return -1;
+		}
+		if (xattr_buf_len == 0) {
+			return 0; // nothing to do...
+		}
+		char *xattr_buf = calloc (xattr_buf_len, sizeof (char));
+		xattr_buf_len  = llistxattr (source_full_name, xattr_buf, xattr_buf_len);
+		if (xattr_buf_len == -1) {
+			perror (source_full_name);
+				free (xattr_buf);
+			return -1;
+		}
+		char *position = xattr_buf;
+		ssize_t pos_len = 0;
+		for ( ; xattr_buf_len > 0; position += pos_len, xattr_buf_len -= pos_len) {
+			ssize_t value_len = lgetxattr (source_full_name, position, NULL, 0);
+			if (value_len == -1) {
+				perror (source_full_name);
+				free (xattr_buf);
+				return -1;
+			}
+			if (value_len > 0) {
+				char *value_buf = calloc (value_len, sizeof (char));
+				value_len = lgetxattr (source_full_name, position, value_buf, value_len); //on succes value_len is same value, no need in new var
+				if (value_len == -1) {
+					perror (source_full_name);
+					free (value_buf);
+					free (xattr_buf);
+					return 1;
+				}
+				//now we have read a correct attr, start setting it to dest
+				if (lsetxattr (dest_full_name, position, value_buf, value_len, 0)) { //create or replace xattr
+					perror (dest_full_name);
+					free (value_buf);
+					free (xattr_buf);
+					return -1;
+				}
+			}
+			if (value_len == 0) {
+				if (lsetxattr (dest_full_name, position, NULL, 0, 0)) { //create or replace xattr
+					perror (dest_full_name);
+					free (xattr_buf);
+					return -1;
+				}
+			}
+			pos_len = strlen (position) + 1;
+		}
+	}
 	return 0;
+}
+
+int extract_absolute_name (fdesc fd, char *source_full_name)
+{
+	if (fd == -1)
+		return -1;
+	if (fd == AT_FDCWD) {
+		if (getcwd (source_full_name, PATH_MAX) == NULL) {
+			perror (NULL);
+			return -1;
+		}
+		return 0;
+	}
+	char proc_fd_name[PATH_MAX] = "/proc/self/fd/";
+	char fd_str[80] = {0};
+	sprintf (fd_str, "%d", fd);
+	strcat (proc_fd_name, fd_str);
+	if (readlink (proc_fd_name, source_full_name, PATH_MAX) == -1) {
+		perror (proc_fd_name);
+		return -1;
+	}
+	//now we have absolute filename of fd
+	return 0;
+}
+
+const char* extract_relative_name (const char *name)
+{
+	//forming new cur_dest_f name (if source name is like ./test/dir/)
+	const char *dest_filename = name;
+	const char *tmp_filename = name;
+	const char *tmp = NULL;
+	while ((tmp = strchr (dest_filename, '/')) != NULL) {
+		tmp_filename = dest_filename;
+		dest_filename = tmp + 1;
+	}
+	if (*dest_filename == 0)
+		dest_filename = tmp_filename;
+	// now dest_filname contains bare name of source file, 'dir' or 'dir/'
+	return dest_filename;
 }
 
 int dir_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
@@ -334,17 +457,7 @@ int dir_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 		}
 	}
 	//forming new cur_dest_f name (if source name is like ./test/dir/)
-	const char *dest_filename = source_f->name;
-	const char *tmp_filename = source_f->name;
-	const char *tmp = NULL;
-	while ((tmp = strchr (dest_filename, '/')) != NULL) {
-		tmp_filename = dest_filename;
-		dest_filename = tmp + 1;
-	}
-	if (*dest_filename == 0)
-		dest_filename = tmp_filename;
-	// now dest_filname contains bare name of source file, 'dir' or 'dir/'
-
+	const char *dest_filename = extract_relative_name (source_f->name);
 	//stat and open cur_dest_dir
 	struct fileinfo cur_dest_f = {0};
 	fileinfo_init (&cur_dest_f, dest_filename);
@@ -476,8 +589,6 @@ int node_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, str
 
 int symlink_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct fileinfo *dest_f)
 {
-	#define NAME_LENGTH 4096
-
 	if (source_f == NULL || dest_f == NULL || dir_f == NULL || dir_f->fd == -1) 
 		return -2;
 
@@ -490,8 +601,8 @@ int symlink_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, 
 		}
 	}
 
-	char linked_name[NAME_LENGTH] = {0};
-	if (readlinkat (source_f->parent_dirfd, source_f->name, linked_name, NAME_LENGTH) == -1) {
+	char linked_name[PATH_MAX] = {0};
+	if (readlinkat (source_f->parent_dirfd, source_f->name, linked_name, PATH_MAX) == -1) {
 		perror (source_f->name);
 		return -1;
 	}
@@ -503,8 +614,6 @@ int symlink_to_file_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, 
 		return -1;
 	}
 	return 0;
-	
-	#undef NAME_LENGTH
 }
 
 int file_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dir_f)
@@ -514,16 +623,7 @@ int file_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dir_f)
 	int ret = 0;
 	int dir_opened_flag = 0;
 	//forming new dest_f name
-	const char *dest_filename = source_f->name;
-	const char *tmp_filename = source_f->name;
-	const char *tmp = NULL;
-	while ((tmp = strchr (dest_filename, '/')) != NULL) {
-		tmp_filename = dest_filename;
-		dest_filename = tmp + 1;
-	}
-	if (*dest_filename == 0)
-		dest_filename = tmp_filename;
-	// now dest_filname contains bare name of source file, 'file' or 'file/'
+	const char *dest_filename = extract_relative_name (source_f->name);
 
 	struct fileinfo dest_f = {0};
 	fileinfo_init (&dest_f, dest_filename);

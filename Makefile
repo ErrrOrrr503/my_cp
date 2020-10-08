@@ -54,6 +54,13 @@ tests:
 	#### testind dir to dir copying ####
 	mkdir $(TDIR)/dir-rw-c/
 	sudo $(TDIR)/my_cp -uft $(TDIR)/dir-rw $(TDIR)/dir-rw-c/
+	#### testing xattr copying ####
+	$(TDIR)/my_cp $(TDIR)/user-rw $(TDIR)/user-rw-xattr
+	setfattr -n user.fred -v chocolate $(TDIR)/user-rw-xattr
+	setfattr -n user.frieda -v bar $(TDIR)/user-rw-xattr
+	setfattr -n user.empty $(TDIR)/user-rw-xattr
+	$(TDIR)/my_cp $(TDIR)/user-rw-xattr $(TDIR)/user-rw-xattr-no
+	$(TDIR)/my_cp -x $(TDIR)/user-rw-xattr $(TDIR)/user-rw-xattr-yes
 clean:
 	rm my_cp
 clean_tests:
