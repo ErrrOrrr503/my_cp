@@ -16,6 +16,7 @@ Is more or less functional implementation of binutils/cp. Will be developed futh
 13) linux rights 'rwx' for user, group, others saving on copy
 14) block read-write file copy
 15) Checking if source and destination are neither regular files nor directories (tested on /dev/urandom, /dev/null)
+16) Extended attributes copying
 
 # known issues:
 1) while attempting to copy to unexisting directory, error message is not that correct:"Это каталог". Well, in qute many cases messages of perror can't be correct.
