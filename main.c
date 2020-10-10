@@ -22,6 +22,7 @@ const char nosupport_source_msg[] = "source must be a regular file, symlink, fif
 const char nosupport_dest_msg[] = "destination must be a regular file, symlink, no file, fifo, socket or directory";
 const char nosupport_dir_to_file_msg[] = "dir to file copying is not supported, maybe you wish to use 'tar' instead?";
 const char noparam_msg[] = "unrecognized option";
+const char cant_copy_to_self[] = "can't copy a dir to parent or sub directory";
 
 struct options {
 	char force_flag;
@@ -66,6 +67,7 @@ int parse_options_and_init (int argc, char *argv[]);
 int fileinfo_init (struct fileinfo *file_f, const char *name);
 const char* extract_relative_name (const char *name);
 int extract_absolute_name (fdesc fd, char *source_full_name);
+int subdir (char *str_1, char *str_2);
 
 int fcopy_calloc (struct fileinfo *source_f, struct fileinfo *dest_f, off_t bs);
 int fstatat_fileinfo (struct fileinfo *dir_f, struct fileinfo *file_f, int flags);
@@ -440,10 +442,27 @@ const char* extract_relative_name (const char *name)
 	return dest_filename;
 }
 
+int subdir (char *str_1, char *str_2)
+{
+	//find shortest str
+	size_t len = strlen (str_1);
+	size_t len_2 = strlen (str_2);
+	if (len_2 < len)
+		len = len_2;
+	for (size_t i = 0; i < len; i++) {
+		if (str_1[i] != str_2[i])
+			return -1;
+	}
+	if ((str_1[len] == '/') || (str_2[len] == '/') || ((str_1[len] == 0) && (str_2[len] == 0))) {
+		return 0;
+	}
+	return -1;
+}
+
 int dir_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 {
 	// dest is DIR! where we will copy entire source dir: source ->cp-> dest/source/...
-	
+	int ret = 0;
 	int dir_opened_flag = 0;
 	if (source_f == NULL || dest_f == NULL)
 		return -2;
@@ -488,7 +507,17 @@ int dir_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 			close (dest_f->fd);
 		return -1;
 	}
-
+	//now we have dest dir opened, let`s check if it is subdir or parent dir of source
+	char full_cur_dest_f_name[PATH_MAX] = {0}, full_source_f_name[PATH_MAX] = {0};
+	ret = extract_absolute_name (cur_dest_f.fd, full_cur_dest_f_name);
+	ret |= extract_absolute_name (source_f->fd, full_source_f_name);
+	printf ("ret %d\n%s\n%s\n", ret, full_cur_dest_f_name, full_source_f_name);
+	if (ret || !subdir (full_cur_dest_f_name, full_source_f_name)) {
+		printf ("%s\n", cant_copy_to_self);
+		if (dir_opened_flag)
+			close (dest_f->fd);
+		return -1;
+	}
 	//getdents & copy
 	char getdents_buffer[g_options.getdents_buffer_size];
 	struct linux_dirent64 *d_entry = (struct linux_dirent64 *) getdents_buffer;
